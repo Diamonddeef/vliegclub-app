@@ -126,13 +126,15 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return (R * c) * 0.539957
-    if allowed_to_fly:
+    
+    if allowed_to_fly == False:
+    st.warning("Pas de parameters aan om de gewichtsstatus te corrigeren.")
+else:
     st.subheader("Echte GPS Luchtstraten Geplot op de Kaart")
     
     m = folium.Map(location=[53.5, 8.5], zoom_start=7)
     folium.Marker(waypoints["EHLE"], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
 
-    # Airspace Status
     edr99_active = vlucht_dag == "Doordeweeks (Ma-Vr)"
     edr99_color = "red" if edr99_active else "gray"
     folium.Polygon(locations=edr99_coords, color=edr99_color, fill=True, fill_opacity=0.12).add_to(m)
@@ -153,10 +155,8 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
             if coord_start not in route_line_coords: route_line_coords.append(coord_start)
             route_line_coords.append(coord_eind)
             
-            # Wiskundige afstand tussen waypoints berekenen
             total_route_distance_nm += calculate_distance_nm(coord_start[0], coord_start[1], coord_eind[0], coord_eind[1])
 
-        # Wind component
         headwind = 0
         if wind_direction == "Noord" and data["track_from_ehle"] < 90: headwind = wind_speed * 0.7
         elif wind_direction == "Oost" and 45 < data["track_from_ehle"] < 135: headwind = wind_speed
@@ -172,7 +172,6 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
             
         fuel_needed = flight_time_hours * FUEL_FLOW_LPH
         
-        # Density Altitude Check
         temp_penalty = max(0, sim_temp - 15) * 0.01
         qnh_penalty = max(0, 1013 - sim_qnh) * 0.005
         needed_runway = BASE_RUNWAY_REQUIRED * (1 + temp_penalty + qnh_penalty)
@@ -195,10 +194,8 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
 
         vliegveld_statussen[icao] = {"color": color, "reason": reason, "data": data, "time": int(flight_time_hours*60), "fuel": int(fuel_needed), "gs": int(ground_speed), "dist": int(total_route_distance_nm)}
 
-        # Route op de kaart tekenen (Knikkende lijnen)
         folium.PolyLine(route_line_coords, color=color, weight=3, opacity=0.85).add_to(m)
         
-        # Waypoints tekenen op de kaart
         for wp_name in data["route_waypoints"][1:-1]:
             folium.CircleMarker(waypoints[wp_name], radius=4, color="purple", fill=True, popup=f"Waypoint: {wp_name}").add_to(m)
 
@@ -206,7 +203,6 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
 
     st_folium(m, width=1100, height=400)
 
-    # Datablokken per vliegveld
     st.markdown("### 📋 Resultaten & Cockpit GPS Routes")
     for icao, status in vliegveld_statussen.items():
         with st.expander(f"✈️ {icao} - {status['data']['name']} ({status['reason']})"):
@@ -221,7 +217,6 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
                 st.code(status['data']['gps_route'], language="text")
                 st.write(f"🏙️ **Logistiek:** {status['data']['city_dist']} | {status['data']['info']}")
 
-    # Smart Alternate Advisor
     st.markdown("---")
     st.header("💡 Smart Alternate Advisor")
     rode_velden = {k: v for k, v in vliegveld_statussen.items() if v["color"] == "red"}
@@ -236,6 +231,3 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
                     st.success(f"👉 Koers wijzigen naar **{g_status['data']['name']} ({g_icao})** (Operationeel Groen). GPS Route: `{g_status['data']['gps_route']}`")
     else:
         st.success("🎉 Alle vliegvelden in de database zijn vandaag groen licht!")
-        
-else:
-    st.warning("Pas de parameters aan om de gewichtsstatus te corrigeren.")
