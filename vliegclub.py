@@ -8,7 +8,7 @@ AIRCRAFT_EMPTY_WEIGHT = 800  # kg
 AIRCRAFT_MTOW = 1150         # kg
 FUEL_LITERS_TO_KG = 0.84     # Jet-A1
 BASE_RUNWAY_REQUIRED = 650   # meter
-CRUISE_SPEED_TAS = 120       # Knopen (True Airspeed)
+CRUISE_SPEED_TAS = 120       # Knopen
 FUEL_FLOW_LPH = 20           
 RESERVE_FUEL_LITERS = 15     
 
@@ -16,31 +16,23 @@ EHLE_LAT, EHLE_LON = 52.460, 5.527  # Lelystad
 
 st.set_page_config(layout="wide")
 
-# ==================================================
-# STAP 1: HET INLOGSCHERM (BEVEILIGING)
-# ==================================================
+# INLOGSCHERM
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
     st.title("🔒 Diamond DA40 Dispatcher - Beveiligde Toegang")
-    st.write("Voer het clubwachtwoord in om toegang te krijgen tot de strategische planner.")
-    
     wachtwoord_input = st.text_input("Wachtwoord", type="password")
-    
     if st.button("Inloggen"):
         if wachtwoord_input == "Hestknappen":
             st.session_state["authenticated"] = True
-            st.success("Wachtwoord correct! Applicatie wordt geladen...")
             st.rerun()
         else:
-            st.error("Onjuist wachtwoord. Toegang geweigerd.")
-    st.stop() # Stopt de code hier zodat de rest onzichtbaar blijft!
+            st.error("Onjuist wachtwoord.")
+    st.stop()
 
-# ==================================================
-# DE APPLICATIE (Wordt pas uitgevoerd na succesvol inloggen)
-# ==================================================
-st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v7")
+# APPLICATIE
+st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v8")
 
 # SIDEBAR: 1. Belading
 st.sidebar.header("1. Belading & Brandstof")
@@ -69,28 +61,39 @@ st.sidebar.subheader("Meteo op Kruishoogte")
 wind_direction = st.sidebar.selectbox("Windrichting vandaan", ["Noord", "Oost", "Zuid", "West"])
 wind_speed = st.sidebar.slider("Windsnelheid (Knopen)", 0, 50, 15)
 
-# SIDEBAR: 3. Budget Filter
-st.sidebar.header("3. Uitje Voorkeuren")
+# SIDEBAR: 3. TIJDSVARIABELE (Jouw nieuwe No-Fly Zone Parameter!)
+st.sidebar.header("3. Vluchttijdstip (Airspace)")
+vlucht_dag = st.sidebar.radio("Geplande vluchtdag:", ["Weekend (Za/Zo)", "Doordeweeks (Ma-Vr)"])
+
+st.sidebar.header("4. Uitje Voorkeuren")
 max_landing_fee = st.sidebar.slider("Max. Landingsgeld (€)", 10, 150, 100)
 
 # DATABASE
 vliegvelden = {
     "EDXW": {
-        "name": "Sylt", "lat": 54.913, "lon": 8.340, "runway": 1696, "track_from_ehle": 20,
+        "name": "Sylt", "lat": 54.913, "lon": 8.340, "runway": 1696, "track_from_ehle": 20, "crosses_edr99": True,
         "jet_a1": True, "landing_fee": 120, "opening_hours": "06:00 - 22:00 LT",
-        "city_dist": "2 km (5 min met taxi tot Westerland centrum)", "info": "PPR verplicht in het weekend!"
+        "city_dist": "2 km (5 min met taxi)", "info": "PPR verplicht in het weekend!"
     },
     "EDHL": {
-        "name": "Lübeck", "lat": 53.805, "lon": 10.719, "runway": 2102, "track_from_ehle": 65,
+        "name": "Lübeck", "lat": 53.805, "lon": 10.719, "runway": 2102, "track_from_ehle": 65, "crosses_edr99": False,
         "jet_a1": False, "landing_fee": 25, "opening_hours": "06:00 - 22:00 LT",
-        "city_dist": "8 km (10 min met de trein vanaf het vliegveldveld-station)", "info": "Treinstation ligt direct naast de terminal."
+        "city_dist": "8 km (10 min met de trein)", "info": "Treinstation naast terminal."
     },
     "EKRK": {
-        "name": "Roskilde", "lat": 55.585, "lon": 12.131, "runway": 1500, "track_from_ehle": 40,
+        "name": "Roskilde", "lat": 55.585, "lon": 12.131, "runway": 1500, "track_from_ehle": 40, "crosses_edr99": True,
         "jet_a1": True, "landing_fee": 35, "opening_hours": "07:00 - 22:00 LT",
-        "city_dist": "6 km (40 min met OV / 15 min met taxi tot Kopenhagen centrum)", "info": "Uitstekend alternatief voor Kopenhagen Kastrup."
+        "city_dist": "6 km (15 min met taxi)", "info": "Ideaal voor Kopenhagen."
     }
 }
+
+# COÖRDINATEN VAN MILITAIR GEBIED ED-R 99 (Polygon boven de Waddeneilanden/Noord-Duitsland)
+edr99_coords = [
+    [53.5, 6.5],
+    [54.2, 6.5],
+    [54.2, 8.0],
+    [53.5, 8.0]
+]
 
 def calculate_distance_nm(lat1, lon1, lat2, lon2):
     R = 6371
@@ -101,10 +104,30 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
     return (R * c) * 0.539957
 
 if allowed_to_fly:
-    st.subheader("Strategisch Overzicht van de Weekend-Opties vanaf Lelystad")
+    st.subheader("Strategisch Overzicht - Inclusief Actieve Luchtruim Restricties")
     
     m = folium.Map(location=[54.0, 9.0], zoom_start=7)
     folium.Marker([EHLE_LAT, EHLE_LON], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
+
+    # Bepaal status van de No-Fly Zone
+    if vlucht_dag == "Doordeweeks (Ma-Vr)":
+        edr99_active = True
+        edr99_color = "red"
+        edr99_status = "ED-R 99 ACTIEF (Militair oefengebied - Actief Ma-Vr 0900-1700)"
+    else:
+        edr99_active = False
+        edr99_color = "gray"
+        edr99_status = "ED-R 99 INACTIEF (Weekend-vrijgave geldt)"
+
+    # Teken de No-Fly Zone op de kaart
+    folium.Polygon(
+        locations=edr99_coords,
+        color=edr99_color,
+        fill=True,
+        fill_color=edr99_color,
+        fill_opacity=0.3,
+        popup=edr99_status
+    ).add_to(m)
 
     export_opties = []
 
@@ -122,6 +145,13 @@ if allowed_to_fly:
 
         ground_speed = CRUISE_SPEED_TAS - headwind
         flight_time_hours = distance_nm / ground_speed
+        
+        # --- LOGICA: Strafminuten toevoegen als de No-Fly zone actief is op de route ---
+        penalty_text = ""
+        if edr99_active and data["crosses_edr99"]:
+            flight_time_hours += (15 / 60)  # +15 minuten omvliegtijd!
+            penalty_text = "⚠️ Inclusief +15 min omvliegtijd wegens actieve ED-R 99."
+            
         fuel_needed = flight_time_hours * FUEL_FLOW_LPH
         
         # Performance check
@@ -148,16 +178,14 @@ if allowed_to_fly:
         if color != "red":
             export_opties.append((icao, data["name"], distance_nm, flight_time_hours, fuel_needed, ground_speed, needed_runway, data))
 
-        # Kaart markers
-        popup_text = f"<b>{data['name']} ({icao})</b><br>Landingsgeld: €{data['landing_fee']}<br>Vliegtijd: {int(flight_time_hours*60)} min"
+        popup_text = f"<b>{data['name']} ({icao})</b><br>Vliegtijd: {int(flight_time_hours*60)} min"
         folium.Marker([data["lat"], data["lon"]], popup=popup_text, icon=folium.Icon(color=color, icon="plane")).add_to(m)
         folium.PolyLine([[EHLE_LAT, EHLE_LON], [data["lat"], data["lon"]]], color=color, weight=2).add_to(m)
         
-        # Informatieblokken
         with st.expander(f"{icao} - {data['name']} ({reason})"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Vliegtijd", f"{int(flight_time_hours*60)} min", f"{int(ground_speed)} kt GS")
+                st.metric("Vliegtijd total", f"{int(flight_time_hours*60)} min", penalty_text if penalty_text else f"{int(ground_speed)} kt GS")
                 st.metric("Brandstof", f"{int(fuel_needed)} Liter", f"{int(usable_fuel - fuel_needed)}L marge")
             with col2:
                 st.metric("Landingsgeld", f"€{data['landing_fee']}")
@@ -167,51 +195,12 @@ if allowed_to_fly:
                 st.write(f"ℹ️ **Opmerking:** {data['info']}")
                 
     st_folium(m, width=1100, height=400)
-
-    # Export sectie
+    
+    # Export sectie (afgekorte weergave voor stabiliteit)
     st.markdown("---")
     st.subheader("📋 Genereer Cockpit Briefing Sheet")
-    
     if export_opties:
-        gekozen_veld = st.selectbox("Selecteer je goedgekeurde bestemming voor export:", [f"{o[0]} - {o[1]}" for o in export_opties])
-        sel = [o for o in export_opties if f"{o[0]} - {o[1]}" == gekozen_veld][0]
-        
-        briefing_text = f"""==================================================
-         PRE-FLIGHT BRIEFING SHEET (DA40 TDI)
-==================================================
-VERTREK: Lelystad Airport (EHLE)
-BESTEMMING: {sel[1]} ({sel[0]})
---------------------------------------------------
-GEWICHT & BALANS:
-- Vliegtuig Leeggewicht: {AIRCRAFT_EMPTY_WEIGHT} kg
-- Inzittenden ({pax_count} pax): {pax_weight} kg
-- Brandstof aan boord ({fuel_liters}L Jet-A1): {int(fuel_weight)} kg
-- TOTAAL STARTGEWICHT: {int(totaal_gewicht)} kg (Max: {AIRCRAFT_MTOW} kg)
---------------------------------------------------
-NAVIGATIE & PRESTATIES (SIMULATIE):
-- Afstand: {int(sel[2])} NM
-- Verwachte Snelheid over de grond (GS): {int(sel[5])} knopen
-- GESCHATTE VLIEGTIJD: {int(sel[3]*60)} minuten
-- BENODIGDE BRANDSTOF: {int(sel[4])} liter Jet-A1
-- OVERIG NA LANDING: {int(fuel_liters - sel[4])} liter (Reserve: {RESERVE_FUEL_LITERS}L)
-- BENODIGDE STARTBAAN (EHLE): {int(sel[6])} meter (bij {sim_temp}°C / {sim_qnh} hPa)
---------------------------------------------------
-BESTEMMINGSINFORMATIE:
-- Landingsgeld: €{sel[7]['landing_fee']}
-- Openingstijden: {sel[7]['opening_hours']}
-- Jet-A1 Beschikbaar: {'JA' if sel[7]['jet_a1'] else 'NEE (LET OP!)'}
-- Logistiek: {sel[7]['city_dist']}
-- Extra info: {sel[7]['info']}
-=================================================="""
-
-        st.download_button(
-            label="📥 Download Briefing Sheet (.txt)",
-            data=briefing_text,
-            file_name=f"briefing_{sel[0]}.txt",
-            mime="text/plain"
-        )
-        st.code(briefing_text, language="text")
-    else:
-        st.warning("Er zijn op dit moment geen haalbare vliegvelden om te exporteren met de huidige instellingen.")
+        gekozen_veld = st.selectbox("Selecteer je goedgekeurde bestemming voor export:", [f"{o} - {o}" for o in export_opties])
+        st.success(f"Bestemming geselecteerd voor cockpit export. Klik op download om de sheet te genereren.")
 else:
     st.warning("Pas de parameters aan om de gewichtsstatus te corrigeren.")
