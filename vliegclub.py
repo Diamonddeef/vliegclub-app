@@ -167,7 +167,7 @@ for icao, data in vliegvelden.items():
         if coord_start not in route_line_coords: route_line_coords.append(coord_start)
         route_line_coords.append(coord_eind)
         
-        total_route_distance_nm += calculate_distance_nm(coord_start, coord_start, coord_eind, coord_eind)
+          total_route_distance_nm += calculate_distance_nm(coord_start[0], coord_start[1], coord_eind[0], coord_eind[1])
 
     # Wind berekening
     headwind = 0
