@@ -216,4 +216,4 @@ if not target_airport.empty:
         st.write(f"⛽ **Jet-A1 Tanken:** {'JA' if has_jet_a1 else 'NEE (LET OP!)'}")
 
 else:
-    st.error(f"❌ ICAO code '{icao_input}' niet gevonden in de Europese database
+    st.error(f"❌ ICAO code '{icao_input}' niet gevonden in de Europese database.")
