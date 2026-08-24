@@ -62,14 +62,14 @@ else:
 
 usable_fuel = fuel_liters - RESERVE_FUEL_LITERS
 
-# SIDEBAR: 2. Wind & Weer
+# SIDEBAR: 2. Weer & Wind
 st.sidebar.header("2. Wind & Weer (Kruishoogte)")
 sim_temp = st.sidebar.slider("Buitentemperatuur (°C)", -10, 40, 15)
 sim_qnh = st.sidebar.slider("Luchtdruk QNH (hPa)", 950, 1050, 1013)
 wind_direction = st.sidebar.selectbox("Windrichting vandaan", ["Noord", "Oost", "Zuid", "West"])
 wind_speed = st.sidebar.slider("Windsnelheid (Knopen)", 0, 50, 15)
 
-# --- NEW IN v12.2: DE TAF VERTREKTIJD SCHUIFBALK ---
+# SIDEBAR: 3. TAF VERTREKTIJD SCHUIFBALK
 st.sidebar.header("3. Geplande Vertrektijd (TAF)")
 vertrektijd = st.sidebar.select_slider(
     "Selecteer vertrektijd (Vanaf Nu):",
@@ -79,7 +79,7 @@ vertrektijd = st.sidebar.select_slider(
 st.sidebar.header("4. Uitje Voorkeuren")
 max_landing_fee = st.sidebar.slider("Max. Landingsgeld (€)", 10, 150, 100)
 
-# GEÜPGRADEDE DATABASE MET 11 EUROPESE STRATEGISCHE GA-VELDEN & TAF METEO TRENDS
+# GEÜPGRADEDE DATABASE MET TAF METEO TRENDS
 vliegvelden = {
     "EDXW": {
         "name": "Sylt (DE)", "runway": 1696, "track_from_ehle": 20, "crosses_edr99": True, "jet_a1": True, "landing_fee": 120, "city_dist": "2 km",
@@ -94,7 +94,7 @@ vliegvelden = {
     "EKRK": {
         "name": "Roskilde (DK)", "runway": 1500, "track_from_ehle": 40, "crosses_edr99": True, "jet_a1": True, "landing_fee": 35, "city_dist": "6 km",
         "route_waypoints": ["EHLE", "GORLO", "NDO", "ALS", "EKRK"], "gps_route": "EHLE DCT GORLO DCT NDO DCT ALS DCT EKRK",
-        "taf_weather": {"Nu VFR": "VFR OK", "+3 Uur (TAF Blok 1)": "VFR OK", "+6 Uur (TAF Blok 2)": "VFR OK", "+9 Uur (TAF Blok 3)": "⚠️ TAF: ONWEER (TSRA)"}
+        "taf_weather": {"Nu VFR": "VFR OK", "+3 Uur (TAF Blok 1)": "VFR OK", "+6 Uur (TAF Blok 2)": "VFR OK", "+9 Uur (TAF Blok 3)": "⚠️ TAF: MIST"}
     },
     "EDWJ": {
         "name": "Juist (DE)", "runway": 700, "track_from_ehle": 15, "crosses_edr99": False, "jet_a1": False, "landing_fee": 18, "city_dist": "0 km",
@@ -137,19 +137,16 @@ st.subheader("Strategisch Overzicht - Inclusief Dynamische TAF-Tijdlijn")
 m = folium.Map(location=[52.5, 6.5], zoom_start=6)
 folium.Marker(waypoints["EHLE"], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
 
-# DYNAMISCHE LUCHTRUIM-ACTIVATIE OP BASIS VAN DE TAF-TIJDBALK
-# Het militaire oefengebied (ED-R 99) is overdag actief (+3 en +6 uur), maar 'Nu' en '+9 uur' (avond) inactief!
+# DYNAMISCHE LUCHTRUIM-ACTIVATIE
 edr99_coords = [[53.5, 6.5], [54.2, 6.5], [54.2, 8.0], [53.5, 8.0]]
 if vertrektijd in ["+3 Uur (TAF Blok 1)", "+6 Uur (TAF Blok 2)"]:
     edr99_active = True
     edr99_color = "red"
-    edr99_status = "ED-R 99 ACTIEF (Militair oefengebied geactiveerd tijdens dit tijdslot!)"
 else:
     edr99_active = False
     edr99_color = "gray"
-    edr99_status = "ED-R 99 INACTIEF (Luchtruim vrijgegeven voor dit tijdslot)"
 
-folium.Polygon(locations=edr99_coords, color=edr99_color, fill=True, fill_opacity=0.15, popup=edr99_status).add_to(m)
+folium.Polygon(locations=edr99_coords, color=edr99_color, fill=True, fill_opacity=0.15).add_to(m)
 
 vliegveld_statussen = {}
 
@@ -161,15 +158,14 @@ for icao, data in vliegvelden.items():
         wp_start = data["route_waypoints"][i]
         wp_eind = data["route_waypoints"][i+1]
         
-        coord_start = waypoints[wp_start]
-        coord_eind = waypoints[wp_eind]
+        lat1, lon1 = waypoints[wp_start]
+        lat2, lon2 = waypoints[wp_eind]
         
-        if coord_start not in route_line_coords: route_line_coords.append(coord_start)
-        route_line_coords.append(coord_eind)
+        if [lat1, lon1] not in route_line_coords: route_line_coords.append([lat1, lon1])
+        route_line_coords.append([lat2, lon2])
         
-          total_route_distance_nm += calculate_distance_nm(coord_start[0], coord_start[1], coord_eind[0], coord_eind[1])
+        total_route_distance_nm += calculate_distance_nm(lat1, lon1, lat2, lon2)
 
-    # Wind berekening
     headwind = 0
     if wind_direction == "Noord" and data["track_from_ehle"] < 90: headwind = wind_speed * 0.7
     elif wind_direction == "Oost" and 45 < data["track_from_ehle"] < 135: headwind = wind_speed
@@ -178,20 +174,15 @@ for icao, data in vliegvelden.items():
     ground_speed = CRUISE_SPEED_TAS - headwind
     flight_time_hours = total_route_distance_nm / ground_speed
     
-    # Strafminuten toepassen als de No-Fly zone actief is én de route erdoorheen loopt
-    penalty_text = ""
     if edr99_active and data["crosses_edr99"]:
         flight_time_hours += (15 / 60)
-        penalty_text = f"⚠️ +15 min omvliegen wegens actieve {edr99_status.split(' ')[0]}"
         
     fuel_needed = flight_time_hours * FUEL_FLOW_LPH
     
-    # Density Altitude Check
     temp_penalty = max(0, sim_temp - 15) * 0.01
     qnh_penalty = max(0, 1013 - sim_qnh) * 0.005
     needed_runway = BASE_RUNWAY_REQUIRED * (1 + temp_penalty + qnh_penalty)
     
-    # Haal het voorspelde TAF-weer op voor DIT vliegveld op DIT specifieke tijdstip
     lokaal_taf_weer = data["taf_weather"][vertrektijd]
     
     color = "green"
@@ -218,7 +209,6 @@ for icao, data in vliegvelden.items():
         "fuel": int(fuel_needed), "gs": int(ground_speed), "dist": int(total_route_distance_nm), "weer": lokaal_taf_weer
     }
 
-    # Plot de knikkende route en waypoints
     folium.PolyLine(route_line_coords, color=color, weight=3, opacity=0.85).add_to(m)
     for wp_name in data["route_waypoints"][1:-1]:
         folium.CircleMarker(waypoints[wp_name], radius=4, color="purple", fill=True, popup=f"Waypoint: {wp_name}").add_to(m)
@@ -226,7 +216,6 @@ for icao, data in vliegvelden.items():
 
 st_folium(m, width=1100, height=400)
 
-# Dashboard details
 st.markdown("### 📋 Resultaten, TAF Weeromslag & GPS Routes")
 for icao, status in vliegveld_statussen.items():
     with st.expander(f"✈️ {icao} - {status['data']['name']} ({status['reason']})"):
@@ -237,7 +226,6 @@ for icao, status in vliegveld_statussen.items():
             st.write(f"⛽ **Verbruik:** {status['fuel']} Liter")
             st.write(f"💰 **Landingsgeld:** €{status['data']['landing_fee']}")
         with col2:
-            # Toon de actieve TAF status van dit specifieke uur!
             if "⚠️" in status['weer']:
                 st.error(f"🌦️ **Actuele TAF Prognose:** {status['weer']}")
             else:
@@ -247,7 +235,6 @@ for icao, status in vliegveld_statussen.items():
             st.code(status['data']['gps_route'], language="text")
             st.write(f"🏙️ **Logistiek:** {status['data']['city_dist']}")
 
-# Smart Alternate Advisor
 st.markdown("---")
 st.header("💡 Smart Alternate Advisor")
 rode_velden = {k: v for k, v in vliegveld_statussen.items() if v["color"] == "red"}
@@ -259,6 +246,6 @@ if rode_velden:
         if groene_velden:
             st.info("🔮 **Voorgestelde Uitwijk-bestemmingen voor dit tijdstip:**")
             for g_icao, g_status in groene_velden.items():
-                st.success(f"👉 Wijzig vertrektijd of koers naar **{g_status['data']['name']} ({g_icao})** (Operationeel Groen). GPS Route: `{g_status['data']['gps_route']}`")
+                st.success(f"👉 Koers wijzigen naar **{g_status['data']['name']} ({g_icao})** (Operationeel Groen). GPS Route: `{g_status['data']['gps_route']}`")
 else:
     st.success("🎉 Alle beschikbare vliegvelden zijn in dit tijdslot groen licht!")
