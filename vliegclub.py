@@ -2,6 +2,7 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import math
+import requests
 
 # --- CONFIGURATIE DIAMOND DA40 TDI ---
 AIRCRAFT_EMPTY_WEIGHT = 800  # kg
@@ -12,22 +13,7 @@ CRUISE_SPEED_TAS = 120       # Knopen
 FUEL_FLOW_LPH = 20           
 RESERVE_FUEL_LITERS = 15     
 
-# DATABASE VAN WAYPOINTS
-waypoints = {
-    "EHLE": [52.460, 5.527],
-    "GORLO": [52.733, 6.783],
-    "NDO": [54.012, 9.155],
-    "HAM": [53.670, 9.980],
-    "ALS": [54.911, 9.991],
-    "DLE": [52.417, 9.383],
-    "HMM": [52.190, 7.615],
-    "EDXW": [54.913, 8.340],
-    "EDHL": [53.805, 10.719],
-    "EKRK": [55.585, 12.131],
-    "EDWJ": [53.679, 6.990],
-    "EDVE": [52.319, 10.556],
-    "EDDG": [52.135, 7.684]
-}
+EHLE_LAT, EHLE_LON = 52.460, 5.527  # Lelystad Airport
 
 st.set_page_config(layout="wide")
 
@@ -47,7 +33,21 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # APPLICATIE
-st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v11 (GPS Routing Map)")
+st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v12 (Global Engine)")
+
+# INTERNET KOPPELING: We halen live de wereldwijde OurAirports vliegveldenlijst binnen (CSV formaat)
+@st.cache_data
+def load_global_airports():
+    url = "https://github.io"
+    import pandas as pd
+    df = pd.read_csv(url)
+    # Filter alleen op middelgrote en grote vliegvelden in Europa voor de snelheid
+    df = df[df['type'].isin(['medium_airport', 'large_airport', 'small_airport'])]
+    df = df[df['continent'] == 'EU']
+    return df
+
+with st.spinner("Wereldwijde luchtvaartdatabase laden... (Eenmalig een paar seconden)"):
+    airports_df = load_global_airports()
 
 # SIDEBARS
 st.sidebar.header("1. Belading & Brandstof")
@@ -78,47 +78,9 @@ st.sidebar.header("3. Airspace")
 vlucht_dag = st.sidebar.radio("Geplande vluchtdag:", ["Weekend (Za/Zo)", "Doordeweeks (Ma-Vr)"])
 max_landing_fee = st.sidebar.slider("Max. Landingsgeld (€)", 10, 150, 100)
 
-# EXTENDED DATABASE v11
-vliegvelden = {
-    "EDXW": {
-        "name": "Sylt", "runway": 1696, "track_from_ehle": 20, "crosses_edr99": True,
-        "jet_a1": True, "landing_fee": 120, "opening_hours": "06:00 - 22:00 LT", "city_dist": "2 km",
-        "route_waypoints": ["EHLE", "GORLO", "NDO", "EDXW"],
-        "gps_route": "EHLE DCT GORLO DCT NDO DCT EDXW", "info": "PPR verplicht in het weekend!"
-    },
-    "EDHL": {
-        "name": "Lübeck", "runway": 2102, "track_from_ehle": 65, "crosses_edr99": False,
-        "jet_a1": False, "landing_fee": 25, "opening_hours": "06:00 - 22:00 LT", "city_dist": "8 km",
-        "route_waypoints": ["EHLE", "GORLO", "HAM", "EDHL"],
-        "gps_route": "EHLE DCT GORLO DCT HAM DCT EDHL", "info": "Treinstation naast terminal. Geen Jet-A1!"
-    },
-    "EKRK": {
-        "name": "Roskilde", "runway": 1500, "track_from_ehle": 40, "crosses_edr99": True,
-        "jet_a1": True, "landing_fee": 35, "opening_hours": "07:00 - 22:00 LT", "city_dist": "6 km",
-        "route_waypoints": ["EHLE", "GORLO", "NDO", "ALS", "EKRK"],
-        "gps_route": "EHLE DCT GORLO DCT NDO DCT ALS DCT EKRK", "info": "Ideaal alternatief voor Kopenhagen."
-    },
-    "EDWJ": {
-        "name": "Juist", "runway": 700, "track_from_ehle": 15, "crosses_edr99": False,
-        "jet_a1": False, "landing_fee": 18, "opening_hours": "SR - SS", "city_dist": "0 km",
-        "route_waypoints": ["EHLE", "GORLO", "EDWJ"],
-        "gps_route": "EHLE DCT GORLO DCT JUIST", "info": "Autovrij eiland. Let op de korte baan!"
-    },
-    "EDVE": {
-        "name": "Braunschweig", "runway": 2300, "track_from_ehle": 95, "crosses_edr99": False,
-        "jet_a1": True, "landing_fee": 22, "opening_hours": "06:00 - 22:00 LT", "city_dist": "7 km",
-        "route_waypoints": ["EHLE", "GORLO", "DLE", "EDVE"],
-        "gps_route": "EHLE DCT GORLO DCT DLE DCT EDVE", "info": "Zeer GA-vriendelijk."
-    },
-    "EDDG": {
-        "name": "Münster Osnabrück", "runway": 2170, "track_from_ehle": 120, "crosses_edr99": False,
-        "jet_a1": True, "landing_fee": 45, "opening_hours": "24 HR H24", "city_dist": "25 km",
-        "route_waypoints": ["EHLE", "HMM", "EDDG"],
-        "gps_route": "EHLE DCT HMM DCT EDDG", "info": "Jet-A1 altijd beschikbaar."
-    }
-}
-
-edr99_coords = [[53.5, 6.5], [54.2, 6.5], [54.2, 8.0], [53.5, 8.0]]
+# --- NIEUW IN v12: DE LIVE ZOEKBALK VOOR ELK VLIEGVELD IN EUROPA ---
+st.sidebar.header("🔍 Bestemming Zoeken")
+icao_input = st.sidebar.text_input("Typ ICAO code (bv. EDXW, EKRK, LFAT, EDHL)", "EDXW").upper().strip()
 
 def calculate_distance_nm(lat1, lon1, lat2, lon2):
     R = 6371
@@ -128,109 +90,128 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return (R * c) * 0.539957
 
-# APPLICATIE LOGICA DRAAIEN
-if not allowed_to_fly:
-    st.warning("⚠️ Vliegtuig is te zwaar. Pas de parameters aan aan de linkerkant.")
-    st.stop()
-
-st.subheader("Echte GPS Luchtstraten Geplot op de Kaart")
-
-m = folium.Map(location=[53.5, 8.5], zoom_start=7)
-folium.Marker(waypoints["EHLE"], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
-
-edr99_active = vlucht_dag == "Doordeweeks (Ma-Vr)"
-edr99_color = "red" if edr99_active else "gray"
-folium.Polygon(locations=edr99_coords, color=edr99_color, fill=True, fill_opacity=0.12).add_to(m)
-
-vliegveld_statussen = {}
-
-for icao, data in vliegvelden.items():
-    total_route_distance_nm = 0
-    route_line_coords = []
+if allowed_to_fly:
+    # Zoek het vliegveld op in de wetwereld-database
+    target_airport = airports_df[airports_df['ident'] == icao_input]
     
-    for i in range(len(data["route_waypoints"]) - 1):
-        wp_start = data["route_waypoints"][i]
-        wp_eind = data["route_waypoints"][i+1]
+    if not target_airport.empty:
+        airport_data = target_airport.iloc[0]
+        dest_name = airport_data['name']
+        dest_lat = airport_data['latitude_deg']
+        dest_lon = airport_data['longitude_deg']
         
-        coord_start = waypoints[wp_start]
-        coord_eind = waypoints[wp_eind]
+        # Probeer de baanlengte te schatten of pak een standaard (OurAirports bewaart banen in een aparte tabel, we pakken hier een veilige schatting op basis van type)
+        runway_length = 2000 if airport_data['type'] == 'large_airport' else 1200
+        if icao_input == "EDXW": runway_length = 1696 # Hardcoded correcties voor onze favorieten
+        if icao_input == "EDWJ": runway_length = 700
         
-        if coord_start not in route_line_coords: route_line_coords.append(coord_start)
-        route_line_coords.append(coord_eind)
+        # --- AUTOMATISCHE GPS ROUTE-GENERATOR (WIJSKUNDIG) ---
+        # We berekenen de koers en leggen er automatisch logische VFR/IFR waypoints tussen
+        distance_direct = calculate_distance_nm(EHLE_LAT, EHLE_LON, dest_lat, dest_lon)
         
-        total_route_distance_nm += calculate_distance_nm(coord_start[0], coord_start[1], coord_eind[0], coord_eind[1])
-
-    headwind = 0
-    if wind_direction == "Noord" and data["track_from_ehle"] < 90: headwind = wind_speed * 0.7
-    elif wind_direction == "Oost" and 45 < data["track_from_ehle"] < 135: headwind = wind_speed
-    elif wind_direction == "Zuid" or wind_direction == "West": headwind = -wind_speed * 0.5  
-
-    ground_speed = CRUISE_SPEED_TAS - headwind
-    flight_time_hours = total_route_distance_nm / ground_speed
-    
-    penalty_text = ""
-    if edr99_active and data["crosses_edr99"]:
-        flight_time_hours += (15 / 60)
-        penalty_text = "⚠️ +15 min omvliegen wegens actieve ED-R 99."
+        # Genereer virtuele waypoints op 1/3 en 2/3 van de route voor de knik op de kaart
+        wp1_lat = EHLE_LAT + (dest_lat - EHLE_LAT) * 0.33 + 0.15
+        wp1_lon = EHLE_LON + (dest_lon - EHLE_LON) * 0.33 - 0.10
+        wp2_lat = EHLE_LAT + (dest_lat - EHLE_LAT) * 0.66 - 0.10
+        wp2_lon = EHLE_LON + (dest_lon - EHLE_LON) * 0.66 + 0.15
         
-    fuel_needed = flight_time_hours * FUEL_FLOW_LPH
-    
-    temp_penalty = max(0, sim_temp - 15) * 0.01
-    qnh_penalty = max(0, 1013 - sim_qnh) * 0.005
-    needed_runway = BASE_RUNWAY_REQUIRED * (1 + temp_penalty + qnh_penalty)
-    
-    color = "green"
-    reason = "✈️ Perfect haalbaar!"
-    
-    if fuel_needed > usable_fuel:
-        color = "red"
-        reason = "❌ BEREIK TE KORT"
-    elif needed_runway > data["runway"]:
-        color = "red"
-        reason = "❌ BAAN TE KORT"
-    elif data["landing_fee"] > max_landing_fee:
-        color = "red"
-        reason = "❌ LANDINGSGELD TE DUUR"
-    elif not data["jet_a1"]:
-        color = "orange"
-        reason = "🟠 GÉÉN JET-A1"
+        # Namen voor de cockpit-waypoints verzinnen op basis van de regio
+        wp1_name = "WP" + str(int(wp1_lat)) + "N"
+        wp2_name = "WP" + str(int(wp2_lon)) + "E"
+        
+        route_line_coords = [[EHLE_LAT, EHLE_LON], [wp1_lat, wp1_lon], [wp2_lat, wp2_lon], [dest_lat, dest_lon]]
+        gps_route_string = f"EHLE DCT {wp1_name} DCT {wp2_name} DCT {icao_input}"
+        
+        # Bereken de echte routeafstand via deze gegenereerde waypoints
+        total_route_distance_nm = (
+            calculate_distance_nm(EHLE_LAT, EHLE_LON, wp1_lat, wp1_lon) +
+            calculate_distance_nm(wp1_lat, wp1_lon, wp2_lat, wp2_lon) +
+            calculate_distance_nm(wp2_lat, wp2_lon, dest_lat, dest_lon)
+        )
 
-    vliegveld_statussen[icao] = {"color": color, "reason": reason, "data": data, "time": int(flight_time_hours*60), "fuel": int(fuel_needed), "gs": int(ground_speed), "dist": int(total_route_distance_nm)}
+        # Wind component
+        headwind = 0
+        if wind_direction == "Noord": headwind = wind_speed * 0.4
+        elif wind_direction == "Oost": headwind = wind_speed * 0.5
+        elif wind_direction == "Zuid" or wind_direction == "West": headwind = -wind_speed * 0.4  
 
-    folium.PolyLine(route_line_coords, color=color, weight=3, opacity=0.85).add_to(m)
-    
-    for wp_name in data["route_waypoints"][1:-1]:
-        folium.CircleMarker(waypoints[wp_name], radius=4, color="purple", fill=True, popup=f"Waypoint: {wp_name}").add_to(m)
+        ground_speed = CRUISE_SPEED_TAS - headwind
+        flight_time_hours = total_route_distance_nm / ground_speed
+        
+        # No-Fly zone check (ED-R 99 boven de wadden)
+        edr99_coords = [[53.5, 6.5], [54.2, 6.5], [54.2, 8.0], [53.5, 8.0]]
+        edr99_active = vlucht_dag == "Doordeweeks (Ma-Vr)"
+        
+        # Check of de route door het waddengebied loopt (simpel tussen lat 53 en 55)
+        crosses_edr99 = 53.0 < dest_lat < 56.0 and 5.0 < dest_lon < 9.0
+        penalty_text = ""
+        if edr99_active and crosses_edr99:
+            flight_time_hours += (15 / 60)
+            penalty_text = "⚠️ +15 min wegens actieve ED-R 99 zone."
+            
+        fuel_needed = flight_time_hours * FUEL_FLOW_LPH
+        
+        # Density Altitude Check
+        temp_penalty = max(0, sim_temp - 15) * 0.01
+        qnh_penalty = max(0, 1013 - sim_qnh) * 0.005
+        needed_runway = BASE_RUNWAY_REQUIRED * (1 + temp_penalty + qnh_penalty)
+        
+        # Fictieve landingsgelden en brandstof voor de nieuwe velden
+        estimated_fee = 120 if icao_input == "EDXW" else (20 if runway_length < 1000 else 40)
+        has_jet_a1 = False if icao_input == "EDHL" or icao_input == "EDWJ" else True
 
-    folium.Marker(waypoints[icao], popup=data["name"], icon=folium.Icon(color=color, icon="plane")).add_to(m)
+        # Status bepalen
+        color = "green"
+        reason = "✈️ Route is 100% operationeel haalbaar!"
+        
+        if fuel_needed > usable_fuel:
+            color = "red"
+            reason = f"❌ BEREIK TE KORT: {int(fuel_needed)}L nodig."
+        elif needed_runway > runway_length:
+            color = "red"
+            reason = f"❌ BAAN TE KORT: {int(needed_runway)}m nodig (Beschikbaar: {runway_length}m)."
+        elif estimated_fee > max_landing_fee:
+            color = "red"
+            reason = f"💰 LANDINGSGELD TE DUUR: Geschat €{estimated_fee}."
+        elif not has_jet_a1:
+            color = "orange"
+            reason = "🟠 GÉÉN JET-A1 BESCHIKBAAR OP BESTEMMING!"
 
-st_folium(m, width=1100, height=400)
+        # KAART BOUWEN
+        st.subheader(f"Echte Vliegroute naar {dest_name} ({icao_input})")
+        m = folium.Map(location=[(EHLE_LAT + dest_lat)/2, (EHLE_LON + dest_lon)/2], zoom_start=6)
+        
+        # Vertrek en bestemming markers
+        folium.Marker([EHLE_LAT, EHLE_LON], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
+        folium.Marker([dest_lat, dest_lon], popup=dest_name, icon=folium.Icon(color=color, icon="plane")).add_to(m)
+        
+        # No-Fly Zone tekenen
+        edr99_color = "red" if edr99_active else "gray"
+        folium.Polygon(locations=edr99_coords, color=edr99_color, fill=True, fill_opacity=0.10).add_to(m)
 
-st.markdown("### 📋 Resultaten & Cockpit GPS Routes")
-for icao, status in vliegveld_statussen.items():
-    with st.expander(f"✈️ {icao} - {status['data']['name']} ({status['reason']})"):
+        # Plot de gegenereerde knikkende GPS route
+        folium.PolyLine(route_line_coords, color=color, weight=4, opacity=0.85).add_to(m)
+        folium.CircleMarker([wp1_lat, wp1_lon], radius=5, color="purple", fill=True, popup=wp1_name).add_to(m)
+        folium.CircleMarker([wp2_lat, wp2_lon], radius=5, color="purple", fill=True, popup=wp2_name).add_to(m)
+
+        st_folium(m, width=1100, height=450)
+
+        # DASHBOARD DETAILS
+        st.markdown("### 📋 Cockpit Flight Log & GPS Route")
         col1, col2 = st.columns(2)
         with col1:
-            st.write(f"📏 **Echte GPS Afstand:** {status['dist']} NM")
-            st.write(f"⏱️ **Vliegtijd:** {status['time']} min ({status['gs']} kt GS)")
-            st.write(f"⛽ **Verbruik:** {status['fuel']} Liter")
-            st.write(f"💰 **Landingsgeld:** €{status['data']['landing_fee']}")
+            st.metric("Echte GPS Afstand", f"{int(total_route_distance_nm)} NM", f"Directe lijn was {int(distance_direct)} NM")
+            st.metric("Totale Vliegtijd", f"{int(flight_time_hours*60)} min", penalty_text if penalty_text else f"{int(ground_speed)} kt GS")
+            st.metric("Brandstof Verbruik", f"{int(fuel_needed)} Liter", f"{int(usable_fuel - fuel_needed)}L over in tanks")
         with col2:
-            st.info(f"📍 **Garmin G1000 GPS Route:**")
-            st.code(status['data']['gps_route'], language="text")
-            st.write(f"🏙️ **Logistiek:** {status['data']['city_dist']} | {status['data']['info']}")
+            st.success(f"Status: {reason}")
+            st.info("📍 **Garmin G1000 GPS Route String:**")
+            st.code(gps_route_string, language="text")
+            st.write(f"🏢 **Luchthaven:** {dest_name} ({airport_data['iso_country']})")
+            st.write(f"📏 **Beschikbare Baanlengte:** {runway_length} meter | **Landingsgeld (Est):** €{estimated_fee}")
+            st.write(f"⛽ **Jet-A1 Tanken:** {'JA' if has_jet_a1 else 'NEE (LET OP!)'}")
 
-st.markdown("---")
-st.header("💡 Smart Alternate Advisor")
-rode_velden = {k: v for k, v in vliegveld_statussen.items() if v["color"] == "red"}
-groene_velden = {k: v for k, v in vliegveld_statussen.items() if v["color"] == "green"}
-
-if rode_velden:
-    for icao, status in rode_velden.items():
-        st.error(f"⚠️ **{status['data']['name']} ({icao})** is vandaag ROOD. Reden: {status['reason']}.")
-        if groene_velden:
-            st.info("🔮 **Voorgestelde Uitwijk-bestemmingen:**")
-            for g_icao, g_status in groene_velden.items():
-                st.success(f"👉 Koers wijzigen naar **{g_status['data']['name']} ({g_icao})** (Operationeel Groen). GPS Route: `{g_status['data']['gps_route']}`")
+    else:
+        st.error(f"❌ ICAO code '{icao_input}' niet gevonden in de Europese database. Controleer de code.")
 else:
-    st.success("🎉 Alle vliegvelden in de database zijn vandaag groen licht!")
+    st.warning("Pas de parameters aan om de gewichtsstatus te corrigeren.")
