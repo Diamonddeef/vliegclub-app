@@ -32,7 +32,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # APPLICATIE
-st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v8")
+st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v9 (Masterpiece)")
 
 # SIDEBAR: 1. Belading
 st.sidebar.header("1. Belading & Brandstof")
@@ -61,7 +61,7 @@ st.sidebar.subheader("Meteo op Kruishoogte")
 wind_direction = st.sidebar.selectbox("Windrichting vandaan", ["Noord", "Oost", "Zuid", "West"])
 wind_speed = st.sidebar.slider("Windsnelheid (Knopen)", 0, 50, 15)
 
-# SIDEBAR: 3. TIJDSVARIABELE (Jouw nieuwe No-Fly Zone Parameter!)
+# SIDEBAR: 3. Vluchttijdstip
 st.sidebar.header("3. Vluchttijdstip (Airspace)")
 vlucht_dag = st.sidebar.radio("Geplande vluchtdag:", ["Weekend (Za/Zo)", "Doordeweeks (Ma-Vr)"])
 
@@ -87,13 +87,7 @@ vliegvelden = {
     }
 }
 
-# COÖRDINATEN VAN MILITAIR GEBIED ED-R 99 (Polygon boven de Waddeneilanden/Noord-Duitsland)
-edr99_coords = [
-    [53.5, 6.5],
-    [54.2, 6.5],
-    [54.2, 8.0],
-    [53.5, 8.0]
-]
+edr99_coords = [[53.5, 6.5], [54.2, 6.5], [54.2, 8.0], [53.5, 8.0]]
 
 def calculate_distance_nm(lat1, lon1, lat2, lon2):
     R = 6371
@@ -104,103 +98,89 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
     return (R * c) * 0.539957
 
 if allowed_to_fly:
-    st.subheader("Strategisch Overzicht - Inclusief Actieve Luchtruim Restricties")
+    st.subheader("Strategisch Overzicht - Inclusief Automatisch Uitwijk Advies")
     
     m = folium.Map(location=[54.0, 9.0], zoom_start=7)
     folium.Marker([EHLE_LAT, EHLE_LON], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
 
-    # Bepaal status van de No-Fly Zone
-    if vlucht_dag == "Doordeweeks (Ma-Vr)":
-        edr99_active = True
-        edr99_color = "red"
-        edr99_status = "ED-R 99 ACTIEF (Militair oefengebied - Actief Ma-Vr 0900-1700)"
-    else:
-        edr99_active = False
-        edr99_color = "gray"
-        edr99_status = "ED-R 99 INACTIEF (Weekend-vrijgave geldt)"
+    # Airspace Status
+    edr99_active = vlucht_dag == "Doordeweeks (Ma-Vr)"
+    edr99_color = "red" if edr99_active else "gray"
+    folium.Polygon(locations=edr99_coords, color=edr99_color, fill=True, fill_opacity=0.2).add_to(m)
 
-    # Teken de No-Fly Zone op de kaart
-    folium.Polygon(
-        locations=edr99_coords,
-        color=edr99_color,
-        fill=True,
-        fill_color=edr99_color,
-        fill_opacity=0.3,
-        popup=edr99_status
-    ).add_to(m)
-
-    export_opties = []
+    # We houden de status per vliegveld bij voor de uitwijkplanner
+    vliegveld_statussen = {}
 
     for icao, data in vliegvelden.items():
         distance_nm = calculate_distance_nm(EHLE_LAT, EHLE_LON, data["lat"], data["lon"])
         
-        # Windberekening
+        # Wind component
         headwind = 0
-        if wind_direction == "Noord" and data["track_from_ehle"] < 90:
-            headwind = wind_speed * 0.7
-        elif wind_direction == "Oost" and 45 < data["track_from_ehle"] < 135:
-            headwind = wind_speed
-        elif wind_direction == "Zuid" or wind_direction == "West":
-            headwind = -wind_speed * 0.5  
+        if wind_direction == "Noord" and data["track_from_ehle"] < 90: headwind = wind_speed * 0.7
+        elif wind_direction == "Oost" and 45 < data["track_from_ehle"] < 135: headwind = wind_speed
+        elif wind_direction == "Zuid" or wind_direction == "West": headwind = -wind_speed * 0.5  
 
         ground_speed = CRUISE_SPEED_TAS - headwind
         flight_time_hours = distance_nm / ground_speed
         
-        # --- LOGICA: Strafminuten toevoegen als de No-Fly zone actief is op de route ---
-        penalty_text = ""
         if edr99_active and data["crosses_edr99"]:
-            flight_time_hours += (15 / 60)  # +15 minuten omvliegtijd!
-            penalty_text = "⚠️ Inclusief +15 min omvliegtijd wegens actieve ED-R 99."
+            flight_time_hours += (15 / 60)
             
         fuel_needed = flight_time_hours * FUEL_FLOW_LPH
         
-        # Performance check
+        # Density Altitude Check
         temp_penalty = max(0, sim_temp - 15) * 0.01
         qnh_penalty = max(0, 1013 - sim_qnh) * 0.005
         needed_runway = BASE_RUNWAY_REQUIRED * (1 + temp_penalty + qnh_penalty)
         
         color = "green"
-        reason = "✈️ Perfect haalbaar!"
+        reason = "OK"
         
         if fuel_needed > usable_fuel:
             color = "red"
-            reason = f"❌ BEREIK TE KORT: {int(fuel_needed)}L nodig."
+            reason = "BEREIK_TE_KORT"
         elif needed_runway > data["runway"]:
             color = "red"
-            reason = f"❌ BAAN TE KORT: {int(needed_runway)}m nodig."
+            reason = "BAAN_TE_KORT"
         elif data["landing_fee"] > max_landing_fee:
             color = "red"
-            reason = f"💰 LANDINGSGELD TE DUUR: €{data['landing_fee']}."
+            reason = "LANDINGSGELD_TE_DUUR"
         elif not data["jet_a1"]:
             color = "orange"
-            reason = "🟠 BEREIKBAAR MAAR GÉÉN JET-A1!"
+            reason = "GEEN_JET_A1"
 
-        if color != "red":
-            export_opties.append((icao, data["name"], distance_nm, flight_time_hours, fuel_needed, ground_speed, needed_runway, data))
+        # Sla de status op voor de slimme matrix zometeen
+        vliegveld_statussen[icao] = {"color": color, "reason": reason, "data": data, "time": int(flight_time_hours*60)}
 
-        popup_text = f"<b>{data['name']} ({icao})</b><br>Vliegtijd: {int(flight_time_hours*60)} min"
-        folium.Marker([data["lat"], data["lon"]], popup=popup_text, icon=folium.Icon(color=color, icon="plane")).add_to(m)
+        # Teken markers
+        folium.Marker([data["lat"], data["lon"]], popup=data["name"], icon=folium.Icon(color=color, icon="plane")).add_to(m)
         folium.PolyLine([[EHLE_LAT, EHLE_LON], [data["lat"], data["lon"]]], color=color, weight=2).add_to(m)
-        
-        with st.expander(f"{icao} - {data['name']} ({reason})"):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Vliegtijd total", f"{int(flight_time_hours*60)} min", penalty_text if penalty_text else f"{int(ground_speed)} kt GS")
-                st.metric("Brandstof", f"{int(fuel_needed)} Liter", f"{int(usable_fuel - fuel_needed)}L marge")
-            with col2:
-                st.metric("Landingsgeld", f"€{data['landing_fee']}")
-                st.write(f"⏰ **Openingstijden:** {data['opening_hours']}")
-            with col3:
-                st.write(f"🏙️ **Stadscentrum:** {data['city_dist']}")
-                st.write(f"ℹ️ **Opmerking:** {data['info']}")
-                
+
     st_folium(m, width=1100, height=400)
-    
-    # Export sectie (afgekorte weergave voor stabiliteit)
+
+    # ==================================================
+    # STAP 3: HET AUTOMATISCHE UITWIJK-ADVIES (FRONTEND)
+    # ==================================================
     st.markdown("---")
-    st.subheader("📋 Genereer Cockpit Briefing Sheet")
-    if export_opties:
-        gekozen_veld = st.selectbox("Selecteer je goedgekeurde bestemming voor export:", [f"{o} - {o}" for o in export_opties])
-        st.success(f"Bestemming geselecteerd voor cockpit export. Klik op download om de sheet te genereren.")
+    st.header("💡 Smart Alternate & Destination Advisor")
+    
+    # Check of er rode vliegvelden zijn
+    rode_velden = {k: v for k, v in vliegveld_statussen.items() if v["color"] == "red"}
+    groene_velden = {k: v for k, v in vliegveld_statussen.items() if v["color"] == "green"}
+    
+    if rode_velden:
+        for icao, status in rode_velden.items():
+            st.error(f"⚠️ **{status['data']['name']} ({icao})** is vandaag NIET haalbaar. Reden: {status['reason'].replace('_', ' ')}.")
+            
+            # De computer zoekt nu automatisch naar een groene uitwijk!
+            if groene_velden:
+                st.info("🔮 **Automatisch Uitwijk Advies van de Planner:**")
+                for g_icao, g_status in groene_velden.items():
+                    st.success(f"👉 Vlieg in plaats daarvan naar **{g_status['data']['name']} ({g_icao})**! Dit veld is 100% operationeel groen. Vliegtijd vanaf Lelystad is slechts {g_status['time']} minuten en het landingsgeld bedraagt €{g_status['data']['landing_fee']}.")
+            else:
+                st.warning("🚨 Er zijn vandaag helaas helemaal geen groene alternatieven beschikbaar in de regio met deze belading/weersomstandigheden.")
+    else:
+        st.success("🎉 Alle bestemmingen zijn vandaag groen licht! Geen automatische uitwijken nodig.")
+        
 else:
     st.warning("Pas de parameters aan om de gewichtsstatus te corrigeren.")
