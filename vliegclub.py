@@ -15,7 +15,32 @@ RESERVE_FUEL_LITERS = 15
 EHLE_LAT, EHLE_LON = 52.460, 5.527  # Lelystad
 
 st.set_page_config(layout="wide")
-st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v6")
+
+# ==================================================
+# STAP 1: HET INLOGSCHERM (BEVEILIGING)
+# ==================================================
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.title("🔒 Diamond DA40 Dispatcher - Beveiligde Toegang")
+    st.write("Voer het clubwachtwoord in om toegang te krijgen tot de strategische planner.")
+    
+    wachtwoord_input = st.text_input("Wachtwoord", type="password")
+    
+    if st.button("Inloggen"):
+        if wachtwoord_input == "Hestknappen":
+            st.session_state["authenticated"] = True
+            st.success("Wachtwoord correct! Applicatie wordt geladen...")
+            st.rerun()
+        else:
+            st.error("Onjuist wachtwoord. Toegang geweigerd.")
+    st.stop() # Stopt de code hier zodat de rest onzichtbaar blijft!
+
+# ==================================================
+# DE APPLICATIE (Wordt pas uitgevoerd na succesvol inloggen)
+# ==================================================
+st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v7")
 
 # SIDEBAR: 1. Belading
 st.sidebar.header("1. Belading & Brandstof")
@@ -76,12 +101,11 @@ def calculate_distance_nm(lat1, lon1, lat2, lon2):
     return (R * c) * 0.539957
 
 if allowed_to_fly:
-    st.subheader("✈️ Strategisch Overzicht van de Weekend-Opties vanaf Lelystad")
+    st.subheader("Strategisch Overzicht van de Weekend-Opties vanaf Lelystad")
     
     m = folium.Map(location=[54.0, 9.0], zoom_start=7)
     folium.Marker([EHLE_LAT, EHLE_LON], popup="Vertrek: Lelystad", icon=folium.Icon(color="blue", icon="star")).add_to(m)
 
-    # We maken een keuzemenu voor de exportknop
     export_opties = []
 
     for icao, data in vliegvelden.items():
@@ -121,7 +145,6 @@ if allowed_to_fly:
             color = "orange"
             reason = "🟠 BEREIKBAAR MAAR GÉÉN JET-A1!"
 
-        # Alleen vliegvelden die NIET rood zijn, mogen op de briefinglijst
         if color != "red":
             export_opties.append((icao, data["name"], distance_nm, flight_time_hours, fuel_needed, ground_speed, needed_runway, data))
 
@@ -130,7 +153,7 @@ if allowed_to_fly:
         folium.Marker([data["lat"], data["lon"]], popup=popup_text, icon=folium.Icon(color=color, icon="plane")).add_to(m)
         folium.PolyLine([[EHLE_LAT, EHLE_LON], [data["lat"], data["lon"]]], color=color, weight=2).add_to(m)
         
-        # Informatieblokken op de website
+        # Informatieblokken
         with st.expander(f"{icao} - {data['name']} ({reason})"):
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -145,18 +168,14 @@ if allowed_to_fly:
                 
     st_folium(m, width=1100, height=400)
 
-    # --- JOUW GLOEDNIEUWE EXPORT SECTIE ---
+    # Export sectie
     st.markdown("---")
     st.subheader("📋 Genereer Cockpit Briefing Sheet")
     
     if export_opties:
-        # Piloot kiest welke haalbare bestemming hij wil exporteren
         gekozen_veld = st.selectbox("Selecteer je goedgekeurde bestemming voor export:", [f"{o[0]} - {o[1]}" for o in export_opties])
-        
-        # Zoek de data van het gekozen vliegveld erbij
         sel = [o for o in export_opties if f"{o[0]} - {o[1]}" == gekozen_veld][0]
         
-        # Bouw de tekstuele briefing sheet
         briefing_text = f"""==================================================
          PRE-FLIGHT BRIEFING SHEET (DA40 TDI)
 ==================================================
@@ -185,15 +204,12 @@ BESTEMMINGSINFORMATIE:
 - Extra info: {sel[7]['info']}
 =================================================="""
 
-        # De Streamlit downloadknop die het bestand direct downloadt!
         st.download_button(
             label="📥 Download Briefing Sheet (.txt)",
             data=briefing_text,
             file_name=f"briefing_{sel[0]}.txt",
             mime="text/plain"
         )
-        
-        # Laat een kleine preview zien op de website
         st.code(briefing_text, language="text")
     else:
         st.warning("Er zijn op dit moment geen haalbare vliegvelden om te exporteren met de huidige instellingen.")
