@@ -38,7 +38,7 @@ st.title("✈️ Diamond DA40 TDI - Cockpit Dispatcher v12.1 (Global Engine)")
 # HERSTELDE INTERNET KOPPELING: We lossen de ParserError op met escapechar en on_bad_lines
 @st.cache_data
 def load_global_airports():
-    url = "https://github.io"
+    url = "https://ourairports.com"
     try:
         # We dwingen pandas om foute regels over te slaan en quotes correct te lezen
         df = pd.read_csv(url, quotechar='"', skipinitialspace=True, on_bad_lines='skip')
